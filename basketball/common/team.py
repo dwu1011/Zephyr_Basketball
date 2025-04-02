@@ -8,6 +8,9 @@ from sklearn.cluster import KMeans
 from tqdm import tqdm
 from transformers import AutoProcessor, SiglipVisionModel
 
+from pathlib import Path
+import joblib
+
 V = TypeVar("V")
 
 SIGLIP_MODEL_PATH = 'google/siglip-base-patch16-224'
@@ -43,6 +46,7 @@ class TeamClassifier:
     A classifier that uses a pre-trained SiglipVisionModel for feature extraction,
     UMAP for dimensionality reduction, and KMeans for clustering.
     """
+
     def __init__(self, device: str = 'cpu', batch_size: int = 32):
         """
        Initialize the TeamClassifier with device and batch size.
@@ -58,6 +62,15 @@ class TeamClassifier:
         self.processor = AutoProcessor.from_pretrained(SIGLIP_MODEL_PATH)
         self.reducer = umap.UMAP(n_components=3)
         self.cluster_model = KMeans(n_clusters=2)
+
+    def save_weights(self, path: str):
+        Path(path).mkdir(parents=True, exist_ok=True)
+        joblib.dump(self.reducer, f"{path}/umap_model.pkl")
+        joblib.dump(self.cluster_model, f"{path}/kmeans_model.pkl")
+
+    def load_weights(self, path: str):
+        self.reducer = joblib.load(f"{path}/umap_model.pkl")
+        self.cluster_model = joblib.load(f"{path}/kmeans_model.pkl")
 
     def extract_features(self, crops: List[np.ndarray]) -> np.ndarray:
         """
@@ -78,7 +91,8 @@ class TeamClassifier:
                 inputs = self.processor(
                     images=batch, return_tensors="pt").to(self.device)
                 outputs = self.features_model(**inputs)
-                embeddings = torch.mean(outputs.last_hidden_state, dim=1).cpu().numpy()
+                embeddings = torch.mean(
+                    outputs.last_hidden_state, dim=1).cpu().numpy()
                 data.append(embeddings)
 
         return np.concatenate(data)
