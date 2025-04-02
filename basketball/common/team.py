@@ -65,7 +65,7 @@ class TeamClassifier:
 
     def save_weights(self, path: str):
         Path(path).mkdir(parents=True, exist_ok=True)
-        joblib.dump(self.reducer, f"{path}/umap_model.pkl")
+        joblib.dump(self.reducer, f"{path}/umap_model.pkl") # TODO fix to pathlib.Path standard
         joblib.dump(self.cluster_model, f"{path}/kmeans_model.pkl")
 
     def load_weights(self, path: str):
