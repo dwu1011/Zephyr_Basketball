@@ -9,6 +9,7 @@ import supervision as sv
 from tqdm import tqdm
 from ultralytics import YOLO
 
+# from common.ball import BallTracker, BallAnnotator
 from configs.basketball import BasketballCourtConfiguration
 
 import warnings
@@ -54,6 +55,7 @@ class Mode(Enum):
     """
     COURT_DETECTION = 'COURT_DETECTION'
     PLAYER_DETECTION = 'PLAYER_DETECTION'
+    # BALL_DETECTION = 'BALL_DETECTION'
 
 
 def run_court_detection(source_video_path: str, device: str) -> Iterator[np.ndarray]:
@@ -171,6 +173,44 @@ def run_player_detection(source_video_path: str, device: str) -> Iterator[np.nda
         yield annotated_frame
 
 
+# def run_ball_detection(source_video_path: str, device: str) -> Iterator[np.ndarray]:
+#     """
+#     Run ball detection on a video and yield annotated frames.
+
+#     Args:
+#         source_video_path (str): Path to the source video.
+#         device (str): Device to run the model on (e.g., 'cpu', 'cuda').
+
+#     Yields:
+#         Iterator[np.ndarray]: Iterator over annotated frames.
+#     """
+#     ball_detection_model = YOLO(PLAYER_DETECTION_MODEL_PATH).to(device=device)
+#     frame_generator = sv.get_video_frames_generator(source_path=source_video_path)
+    
+#     ball_tracker = BallTracker(buffer_size=20)
+#     ball_annotator = BallAnnotator(radius=6, buffer_size=10)
+
+#     def callback(image_slice: np.ndarray) -> sv.Detections:
+#         result = ball_detection_model(image_slice, imgsz=640, verbose=False)[0]
+#         detections = sv.Detections.from_ultralytics(result)
+#         detections =  detections[detections.class_id == BALL_CLASS_ID]
+#         return detections[detections.confidence > 0.5]
+
+#     slicer = sv.InferenceSlicer(
+#         callback=callback,
+#         slice_wh=(640, 640),
+#         overlap_wh=[0.3,0.3],
+#         overlap_ratio_wh=None,
+#     )
+
+#     for frame in frame_generator:
+#         detections = slicer(frame).with_nms(threshold=0.25)
+#         detections = ball_tracker.update(detections)
+#         annotated_frame = frame.copy()
+#         annotated_frame = ball_annotator.annotate(annotated_frame, detections)
+#         yield annotated_frame
+
+
 def main(source_video_path: str, target_video_path: str, device: str, mode: Mode) -> None:
 
     if mode == Mode.COURT_DETECTION:
@@ -179,6 +219,9 @@ def main(source_video_path: str, target_video_path: str, device: str, mode: Mode
     elif mode == Mode.PLAYER_DETECTION:
         frame_generator = run_player_detection(
             source_video_path=source_video_path, device=device)
+    # elif mode == Mode.BALL_DETECTION:
+    #     frame_generator = run_ball_detection(
+    #         source_video_path=source_video_path, device=device)
     else:
         raise NotImplementedError(f"Mode {mode} is not implemented.")
 
@@ -208,7 +251,7 @@ if __name__ == '__main__':
     parser.add_argument('--target_video_path', type=str, default ='output.mp4')
     parser.add_argument('--device', type=str, default='cpu')
     # parser.add_argument('--mode', type=Mode, default=Mode.RADAR)
-    parser.add_argument('--mode', type=Mode, default=Mode.PLAYER_DETECTION)
+    parser.add_argument('--mode', type=Mode, default=Mode.BALL_DETECTION)
     args = parser.parse_args()
     main(
         source_video_path=args.source_video_path,
