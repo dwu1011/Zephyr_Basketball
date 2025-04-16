@@ -6,12 +6,12 @@ import numpy as np
 
 from configs.basketball import BasketballCourtConfiguration
 
-def draw_basketball_court(
+def draw_court(
     config: BasketballCourtConfiguration,
     background_color: sv.Color = sv.Color(34, 139, 34),
     line_color: sv.Color = sv.Color.WHITE,
-    padding: int = 50,
-    line_thickness: int = 4,
+    padding: int = 10,
+    line_thickness: int = 1,
     point_radius: int = 8,
     scale: float = 0.1
 ) -> np.ndarray:
@@ -26,11 +26,8 @@ def draw_basketball_court(
         line_color (sv.Color, optional): Color of the pitch lines.
             Defaults to sv.Color.WHITE.
         padding (int, optional): Padding around the pitch in pixels.
-            Defaults to 50.
         line_thickness (int, optional): Thickness of the pitch lines in pixels.
-            Defaults to 4.
         point_radius (int, optional): Radius of the penalty spot points in pixels.
-            Defaults to 8.
         scale (float, optional): Scaling factor for the pitch dimensions.
             Defaults to 0.1.
 
@@ -66,9 +63,9 @@ def draw_points_on_court(
     xy: np.ndarray,
     face_color: sv.Color = sv.Color.RED,
     edge_color: sv.Color = sv.Color.BLACK,
-    radius: int = 10,
-    thickness: int = 2,
-    padding: int = 50,
+    radius: int = 4,
+    thickness: int = 1,
+    padding: int = 10,
     scale: float = 0.1,
     pitch: Optional[np.ndarray] = None
 ) -> np.ndarray:
@@ -85,11 +82,8 @@ def draw_points_on_court(
         edge_color (sv.Color, optional): Color of the point edges.
             Defaults to sv.Color.BLACK.
         radius (int, optional): Radius of the points in pixels.
-            Defaults to 10.
         thickness (int, optional): Thickness of the point edges in pixels.
-            Defaults to 2.
         padding (int, optional): Padding around the pitch in pixels.
-            Defaults to 50.
         scale (float, optional): Scaling factor for the pitch dimensions.
             Defaults to 0.1.
         pitch (Optional[np.ndarray], optional): Existing pitch image to draw points on.

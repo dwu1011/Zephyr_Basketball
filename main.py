@@ -9,8 +9,10 @@ import supervision as sv
 from tqdm import tqdm
 from ultralytics import YOLO
 
+from annotators.annotate import draw_court, draw_points_on_court
 # from common.ball import BallTracker, BallAnnotator
 from common.team import TeamClassifier
+from common.view import ViewTransformer
 from configs.basketball import BasketballCourtConfiguration
 
 import warnings
@@ -23,8 +25,9 @@ PLAYER_DETECTION_MODEL_PATH = os.path.join(PARENT_DIR, 'data/models/nba_detectio
 
 CONFIG = BasketballCourtConfiguration()
 
+BALL_CLASS_ID = 'Ball'
 PLAYER_CLASS_ID = 'Player'
-BALL_CLASS_ID = 0
+REFEREE_CLASS_ID = 'Ref'
 
 STRIDE = 60
 
@@ -70,6 +73,7 @@ class Mode(Enum):
     # BALL_DETECTION = 'BALL_DETECTION'
     PLAYER_TRACKING = 'PLAYER_TRACKING'
     TEAM_CLASSIFICATION = 'TEAM_CLASSIFICATION'
+    RADAR = 'RADAR'
 
 
 def run_court_detection(source_video_path: str, device: str) -> Iterator[np.ndarray]:
@@ -260,6 +264,7 @@ def run_player_tracking(source_video_path: str, device: str) -> Iterator[np.ndar
         annotated_frame = ELLIPSE_ANNOTATOR.annotate(annotated_frame, detections)
         annotated_frame = ELLIPSE_LABEL_ANNOTATOR.annotate(
             annotated_frame, detections, labels=labels)
+
         yield annotated_frame
 
 
@@ -319,7 +324,7 @@ def run_team_classification(source_video_path: str, device: str) -> Iterator[np.
         labels = [str(tracker_id) for tracker_id in players.tracker_id]
 
         detections.xyxy = detections.xyxy + np.array([PADDING, PADDING, PADDING, PADDING], dtype=np.float32)
-        
+
         annotated_frame = cv2.copyMakeBorder(
             frame.copy(),
             top=PADDING,
@@ -333,6 +338,139 @@ def run_team_classification(source_video_path: str, device: str) -> Iterator[np.
             annotated_frame, players, custom_color_lookup=color_lookup)
         annotated_frame = ELLIPSE_LABEL_ANNOTATOR.annotate(
             annotated_frame, players, labels, custom_color_lookup=color_lookup)
+
+        yield annotated_frame
+
+
+def render_radar(
+    detections: sv.Detections,
+    keypoints: sv.KeyPoints,
+    color_lookup: np.ndarray,
+    vertex_indices: List[int]
+) -> np.ndarray:
+    if keypoints.xy.shape[1] < 4:
+        # Not enough keypoints for a stable homography
+        return draw_court(CONFIG)
+
+    # Match detected keypoints to the canonical CONFIG vertices
+    source_points = keypoints.xy[0].astype(np.float32)
+    target_points = np.array([CONFIG.vertices[i] for i in vertex_indices], dtype=np.float32)
+
+    transformer = ViewTransformer(
+        source=source_points,
+        target=target_points
+    )
+
+    # Transform bottom-center anchor positions of detections
+    xy = detections.get_anchors_coordinates(anchor=sv.Position.BOTTOM_CENTER)
+    transformed_xy = transformer.transform_points(points=xy)
+
+    # Draw court and overlay players per team
+    radar = draw_court(config=CONFIG)
+    for i in np.unique(color_lookup):
+        radar = draw_points_on_court(
+            config=CONFIG,
+            xy=transformed_xy[color_lookup == i],
+            face_color=sv.Color.from_hex(COLORS[i]),
+            pitch=radar
+        )
+    return radar
+
+
+def run_radar(source_video_path: str, device: str) -> Iterator[np.ndarray]:
+    player_detection_model = YOLO(PLAYER_DETECTION_MODEL_PATH).to(device=device)
+    court_detection_model = YOLO(COURT_DETECTION_MODEL_PATH).to(device=device)
+    frame_generator = sv.get_video_frames_generator(
+        source_path=source_video_path, stride=STRIDE
+    )
+
+    crops = []
+    for frame in tqdm(frame_generator, desc='collecting crops'):
+        result = player_detection_model(frame, imgsz=1280, verbose=False)[0]
+        detections = sv.Detections.from_ultralytics(result)
+        crops += get_crops(frame, detections[detections.data['class_name'] == PLAYER_CLASS_ID])
+
+    team_classifier = TeamClassifier(device=device)
+    team_classifier.fit(crops)
+
+    frame_generator = sv.get_video_frames_generator(source_path=source_video_path)
+    tracker = sv.ByteTrack(minimum_consecutive_frames=3)
+
+    for frame in frame_generator:
+        result = court_detection_model(frame, verbose=False)[0]
+        keypoints = sv.KeyPoints.from_ultralytics(result)
+
+        CLASS_TO_INDEX = {
+            "Center Line": 0,
+            "Left Paint": 1,
+            "Left Three Point": 2,
+            "Right Paint": 3,
+            "Right Three Point": 4,
+        }
+
+        flattened_keypoints = []
+        filtered_labels = []
+        filtered_colors = []
+        vertex_indices = []
+
+        num_kps_per_object = 5
+
+        for obj_idx in range(keypoints.xy.shape[0]):
+            class_name = keypoints.data['class_name'][obj_idx]
+            if class_name not in CLASS_TO_INDEX:
+                continue
+
+            base_idx = CLASS_TO_INDEX[class_name] * num_kps_per_object
+            labels_slice = CONFIG.labels[base_idx:base_idx + num_kps_per_object]
+            colors_slice = CONFIG.colors[base_idx:base_idx + num_kps_per_object]
+
+            for kp_idx, (x, y) in enumerate(keypoints.xy[obj_idx]):
+                if x == 0 and y == 0:
+                    continue
+                flattened_keypoints.append([x, y])
+                filtered_labels.append(labels_slice[kp_idx])
+                filtered_colors.append(colors_slice[kp_idx])
+                vertex_indices.append(base_idx + kp_idx)
+
+        if len(flattened_keypoints) == 0:
+            continue
+
+        flattened_keypoints = np.array(flattened_keypoints, dtype=np.float32)
+        flattened_keypoints = np.array([flattened_keypoints])
+        flattened_keypoints = sv.KeyPoints(xy=flattened_keypoints)
+
+        result = player_detection_model(frame, imgsz=1280, verbose=False)[0]
+        detections = sv.Detections.from_ultralytics(result)
+        detections = tracker.update_with_detections(detections)
+
+        players = detections[detections.data['class_name'] == PLAYER_CLASS_ID]
+        crops = get_crops(frame, players)
+        players_team_id = team_classifier.predict(crops)
+
+        detections = sv.Detections.merge([players])
+        color_lookup = np.array(players_team_id.tolist())
+        labels = [str(tracker_id) for tracker_id in detections.tracker_id]
+
+        annotated_frame = frame.copy()
+        annotated_frame = ELLIPSE_ANNOTATOR.annotate(
+            annotated_frame, detections, custom_color_lookup=color_lookup)
+        annotated_frame = ELLIPSE_LABEL_ANNOTATOR.annotate(
+            annotated_frame, detections, labels,
+            custom_color_lookup=color_lookup)
+            
+        h, w, _ = frame.shape
+        radar = render_radar(detections, flattened_keypoints, color_lookup, vertex_indices)
+        radar = sv.resize_image(radar, (w // 2, h // 2))
+
+        radar_h, radar_w, _ = radar.shape
+        rect = sv.Rect(
+            x=w // 2 - radar_w // 2,
+            y=h - radar_h,
+            width=radar_w,
+            height=radar_h
+        )
+        annotated_frame = sv.draw_image(annotated_frame, radar, opacity=0.5, rect=rect)
+
         yield annotated_frame
 
 
@@ -353,20 +491,24 @@ def main(source_video_path: str, target_video_path: str, device: str, mode: Mode
     elif mode == Mode.TEAM_CLASSIFICATION:
         frame_generator = run_team_classification(
             source_video_path=source_video_path, device=device)
+    elif mode == Mode.RADAR:
+        frame_generator = run_radar(
+            source_video_path=source_video_path, device=device)
     else:
         raise NotImplementedError(f"Mode {mode} is not implemented.")
 
     video_info = sv.VideoInfo.from_video_path(source_video_path)
-    padded_resolution = (
-        video_info.resolution_wh[0] + 2 * PADDING,
-        video_info.resolution_wh[1] + 2 * PADDING
-    )
-    updated_video_info = sv.VideoInfo(
-        fps=video_info.fps,
-        width=padded_resolution[0],
-        height=padded_resolution[1]
-    )
-    with sv.VideoSink(target_video_path, updated_video_info) as sink:
+    if mode != Mode.RADAR:
+        padded_resolution = (
+            video_info.resolution_wh[0] + 2 * PADDING,
+            video_info.resolution_wh[1] + 2 * PADDING
+        )
+        video_info = sv.VideoInfo(
+            fps=video_info.fps,
+            width=padded_resolution[0],
+            height=padded_resolution[1]
+        )
+    with sv.VideoSink(target_video_path, video_info) as sink:
         for frame in frame_generator:
             sink.write_frame(frame)
 
@@ -381,8 +523,7 @@ if __name__ == '__main__':
     parser.add_argument('--source_video_path', type=str, required=True)
     parser.add_argument('--target_video_path', type=str, default ='output.mp4')
     parser.add_argument('--device', type=str, default='cpu')
-    # parser.add_argument('--mode', type=Mode, default=Mode.RADAR)
-    parser.add_argument('--mode', type=Mode, default=Mode.TEAM_CLASSIFICATION)
+    parser.add_argument('--mode', type=Mode, default=Mode.RADAR)
     args = parser.parse_args()
     main(
         source_video_path=args.source_video_path,
