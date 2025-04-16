@@ -2,3 +2,6 @@ env
 __pycache__
 *.pt
 *.mp4
+
+!sample-work/
+!sample-work/*.mp4
