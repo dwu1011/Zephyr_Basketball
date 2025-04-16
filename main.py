@@ -48,6 +48,17 @@ BOX_LABEL_ANNOTATOR = sv.LabelAnnotator(
     text_padding=5,
     text_thickness=1,
 )
+ELLIPSE_ANNOTATOR = sv.EllipseAnnotator(
+    color=sv.ColorPalette.from_hex(COLORS),
+    thickness=2
+)
+ELLIPSE_LABEL_ANNOTATOR = sv.LabelAnnotator(
+    color=sv.ColorPalette.from_hex(COLORS),
+    text_color=sv.Color.from_hex('#FFFFFF'),
+    text_padding=5,
+    text_thickness=1,
+    text_position=sv.Position.BOTTOM_CENTER,
+)
 
 class Mode(Enum):
     """
@@ -56,6 +67,7 @@ class Mode(Enum):
     COURT_DETECTION = 'COURT_DETECTION'
     PLAYER_DETECTION = 'PLAYER_DETECTION'
     # BALL_DETECTION = 'BALL_DETECTION'
+    PLAYER_TRACKING = 'PLAYER_TRACKING'
 
 
 def run_court_detection(source_video_path: str, device: str) -> Iterator[np.ndarray]:
@@ -211,6 +223,44 @@ def run_player_detection(source_video_path: str, device: str) -> Iterator[np.nda
 #         yield annotated_frame
 
 
+def run_player_tracking(source_video_path: str, device: str) -> Iterator[np.ndarray]:
+    """
+    Run player tracking on a video and yield annotated frames with tracked players.
+
+    Args:
+        source_video_path (str): Path to the source video.
+        device (str): Device to run the model on (e.g., 'cpu', 'cuda').
+
+    Yields:
+        Iterator[np.ndarray]: Iterator over annotated frames.
+    """
+    player_detection_model = YOLO(PLAYER_DETECTION_MODEL_PATH).to(device=device)
+    frame_generator = sv.get_video_frames_generator(source_path=source_video_path)
+    tracker = sv.ByteTrack(minimum_consecutive_frames=3)
+    for frame in frame_generator:
+        result = player_detection_model(frame, imgsz=1280, verbose=False)[0]
+        detections = sv.Detections.from_ultralytics(result)
+        detections = tracker.update_with_detections(detections[detections.data['class_name'] == PLAYER_CLASS_ID])
+
+        labels = [str(tracker_id) for tracker_id in detections.tracker_id]
+
+        detections.xyxy = detections.xyxy + np.array([PADDING, PADDING, PADDING, PADDING], dtype=np.float32)
+
+        annotated_frame = cv2.copyMakeBorder(
+            frame.copy(),
+            top=PADDING,
+            bottom=PADDING,
+            left=PADDING,
+            right=PADDING,
+            borderType=cv2.BORDER_CONSTANT,
+            value=[255, 255, 255],
+        )
+        annotated_frame = ELLIPSE_ANNOTATOR.annotate(annotated_frame, detections)
+        annotated_frame = ELLIPSE_LABEL_ANNOTATOR.annotate(
+            annotated_frame, detections, labels=labels)
+        yield annotated_frame
+
+
 def main(source_video_path: str, target_video_path: str, device: str, mode: Mode) -> None:
 
     if mode == Mode.COURT_DETECTION:
@@ -222,6 +272,9 @@ def main(source_video_path: str, target_video_path: str, device: str, mode: Mode
     # elif mode == Mode.BALL_DETECTION:
     #     frame_generator = run_ball_detection(
     #         source_video_path=source_video_path, device=device)
+    elif mode == Mode.PLAYER_TRACKING:
+        frame_generator = run_player_tracking(
+            source_video_path=source_video_path, device=device)
     else:
         raise NotImplementedError(f"Mode {mode} is not implemented.")
 
@@ -251,7 +304,7 @@ if __name__ == '__main__':
     parser.add_argument('--target_video_path', type=str, default ='output.mp4')
     parser.add_argument('--device', type=str, default='cpu')
     # parser.add_argument('--mode', type=Mode, default=Mode.RADAR)
-    parser.add_argument('--mode', type=Mode, default=Mode.BALL_DETECTION)
+    parser.add_argument('--mode', type=Mode, default=Mode.PLAYER_TRACKING)
     args = parser.parse_args()
     main(
         source_video_path=args.source_video_path,
