@@ -92,3 +92,48 @@ class SoccerPitchConfiguration:
         "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347",
         "#00BFFF", "#00BFFF"
     ])
+
+
+@dataclass
+class BasketballCourtConfiguration:
+    """
+    Configuration for a basketball court.
+    The court is defined by its width, length, and various markings.
+    """
+    # Dimensions in centimeters
+    # The dimensions are based on FIBA regulations
+    # https://www.fiba.basketball/documents/2021/8/3/2021_FIBA_Basketball_Court_Construction_Guide.pdf
+    # and the official FIBA court dimensions
+
+
+    width: int = 1524  # [cm]
+    length: int = 2440  # [cm]
+
+    @property
+    def vertices(self) -> List[Tuple[int, int]]:
+        return [
+            (0, 0),  # 1
+            (0, self.width),  # 2
+            (self.length, self.width),  # 3
+            (self.length, 0),  # 4
+        ]
+
+    edges: List[Tuple[int, int]] = field(default_factory=lambda: [
+        (1, 2), (2, 3), (3, 4), (4, 1)
+    ])
+
+    labels: List[str] = field(default_factory=lambda: [
+        "01", "02", "03", "04", "05", "06", "07", "08", "09", "10",
+        "11", "12", "13", "15", "16", "17", "18", "20", "21", "22",
+        "23", "24", "25", "26", "27", "28", "29", "30", "31", "32",
+        "14", "19"
+    ])
+
+    colors: List[str] = field(default_factory=lambda: [
+        "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493",
+        "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493", "#FF1493",
+        "#FF1493", "#00BFFF", "#00BFFF", "#00BFFF", "#00BFFF", "#FF6347",
+        "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347",
+        "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347", "#FF6347",
+        "#00BFFF", "#00BFFF"
+    ])

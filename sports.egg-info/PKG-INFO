@@ -1,0 +1,26 @@
+Metadata-Version: 2.4
+Name: sports
+Version: 0.1.0
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: supervision
+Requires-Dist: numpy
+Requires-Dist: opencv-python
+Requires-Dist: transformers
+Requires-Dist: umap-learn
+Requires-Dist: scikit-learn
+Requires-Dist: tqdm
+Requires-Dist: sentencepiece
+Requires-Dist: protobuf
+Provides-Extra: tests
+Requires-Dist: pytest; extra == "tests"
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: requires-python
+
+# Zephyr_Basketball
+
+# Installation
+

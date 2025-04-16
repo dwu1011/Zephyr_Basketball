@@ -5,3 +5,5 @@ classifi*
 crop*
 *.zip
 *.pt
+.egg-info
+.mp4

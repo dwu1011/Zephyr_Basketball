@@ -123,4 +123,5 @@ class TeamClassifier:
 
         data = self.extract_features(crops)
         projections = self.reducer.transform(data)
-        return self.cluster_model.predict(projections)
+        tmp =  self.cluster_model.predict(projections)
+        return tmp
