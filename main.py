@@ -10,6 +10,7 @@ from tqdm import tqdm
 from ultralytics import YOLO
 
 # from common.ball import BallTracker, BallAnnotator
+from common.team import TeamClassifier
 from configs.basketball import BasketballCourtConfiguration
 
 import warnings
@@ -68,6 +69,7 @@ class Mode(Enum):
     PLAYER_DETECTION = 'PLAYER_DETECTION'
     # BALL_DETECTION = 'BALL_DETECTION'
     PLAYER_TRACKING = 'PLAYER_TRACKING'
+    TEAM_CLASSIFICATION = 'TEAM_CLASSIFICATION'
 
 
 def run_court_detection(source_video_path: str, device: str) -> Iterator[np.ndarray]:
@@ -261,6 +263,79 @@ def run_player_tracking(source_video_path: str, device: str) -> Iterator[np.ndar
         yield annotated_frame
 
 
+def get_crops(frame: np.ndarray, detections: sv.Detections) -> List[np.ndarray]:
+    """
+    Extract crops from the frame based on detected bounding boxes.
+
+    Args:
+        frame (np.ndarray): The frame from which to extract crops.
+        detections (sv.Detections): Detected objects with bounding boxes.
+
+    Returns:
+        List[np.ndarray]: List of cropped images.
+    """
+    return [sv.crop_image(frame, xyxy) for xyxy in detections.xyxy]
+
+
+def run_team_classification(source_video_path: str, device: str) -> Iterator[np.ndarray]:
+    """
+    Run team classification on a video and yield annotated frames with team colors.
+
+    Args:
+        source_video_path (str): Path to the source video.
+        device (str): Device to run the model on (e.g., 'cpu', 'cuda').
+
+    Yields:
+        Iterator[np.ndarray]: Iterator over annotated frames.
+    """
+    player_detection_model = YOLO(PLAYER_DETECTION_MODEL_PATH).to(device=device)
+    frame_generator = sv.get_video_frames_generator(
+        source_path=source_video_path, stride=STRIDE)
+
+    crops = []
+    for frame in tqdm(frame_generator, desc='collecting crops'):
+        result = player_detection_model(frame, imgsz=1280, verbose=False)[0]
+        detections = sv.Detections.from_ultralytics(result)
+        crops += get_crops(frame, detections[detections.data['class_name'] == PLAYER_CLASS_ID])
+
+    team_classifier = TeamClassifier(device=device)
+    team_classifier.fit(crops)
+
+    frame_generator = sv.get_video_frames_generator(source_path=source_video_path)
+    tracker = sv.ByteTrack(minimum_consecutive_frames=3)
+    for frame in frame_generator:
+        result = player_detection_model(frame, imgsz=1280, verbose=False)[0]
+        detections = sv.Detections.from_ultralytics(result)
+        detections = tracker.update_with_detections(detections)
+
+        players = detections[detections.data['class_name'] == PLAYER_CLASS_ID]
+        crops = get_crops(frame, players)
+
+        players_team_id = team_classifier.predict(crops)
+
+        color_lookup = np.array(
+                players_team_id.tolist()
+        )
+        labels = [str(tracker_id) for tracker_id in players.tracker_id]
+
+        detections.xyxy = detections.xyxy + np.array([PADDING, PADDING, PADDING, PADDING], dtype=np.float32)
+        
+        annotated_frame = cv2.copyMakeBorder(
+            frame.copy(),
+            top=PADDING,
+            bottom=PADDING,
+            left=PADDING,
+            right=PADDING,
+            borderType=cv2.BORDER_CONSTANT,
+            value=[255, 255, 255],
+        )
+        annotated_frame = ELLIPSE_ANNOTATOR.annotate(
+            annotated_frame, players, custom_color_lookup=color_lookup)
+        annotated_frame = ELLIPSE_LABEL_ANNOTATOR.annotate(
+            annotated_frame, players, labels, custom_color_lookup=color_lookup)
+        yield annotated_frame
+
+
 def main(source_video_path: str, target_video_path: str, device: str, mode: Mode) -> None:
 
     if mode == Mode.COURT_DETECTION:
@@ -274,6 +349,9 @@ def main(source_video_path: str, target_video_path: str, device: str, mode: Mode
     #         source_video_path=source_video_path, device=device)
     elif mode == Mode.PLAYER_TRACKING:
         frame_generator = run_player_tracking(
+            source_video_path=source_video_path, device=device)
+    elif mode == Mode.TEAM_CLASSIFICATION:
+        frame_generator = run_team_classification(
             source_video_path=source_video_path, device=device)
     else:
         raise NotImplementedError(f"Mode {mode} is not implemented.")
@@ -304,7 +382,7 @@ if __name__ == '__main__':
     parser.add_argument('--target_video_path', type=str, default ='output.mp4')
     parser.add_argument('--device', type=str, default='cpu')
     # parser.add_argument('--mode', type=Mode, default=Mode.RADAR)
-    parser.add_argument('--mode', type=Mode, default=Mode.PLAYER_TRACKING)
+    parser.add_argument('--mode', type=Mode, default=Mode.TEAM_CLASSIFICATION)
     args = parser.parse_args()
     main(
         source_video_path=args.source_video_path,
