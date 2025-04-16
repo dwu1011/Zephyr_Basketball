@@ -3,3 +3,5 @@ supervision
 transformers
 ultralytics
 umap-learn
+sentencepiece
+protobuf
