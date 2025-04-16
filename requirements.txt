@@ -1,1 +1,5 @@
+opencv-python
+supervision
+transformers
 ultralytics
+umap-learn
