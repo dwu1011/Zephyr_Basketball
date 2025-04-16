@@ -149,8 +149,19 @@ def run_player_detection(source_video_path: str, device: str) -> Iterator[np.nda
     for frame in frame_generator:
         result = player_detection_model(frame, imgsz=1280, verbose=False)[0]
         detections = sv.Detections.from_ultralytics(result)
+        
+        detections.xyxy = detections.xyxy + np.array([PADDING, PADDING, PADDING, PADDING], dtype=np.float32)
 
-        annotated_frame = frame.copy()
+        annotated_frame = cv2.copyMakeBorder(
+            frame.copy(),
+            top=PADDING,
+            bottom=PADDING,
+            left=PADDING,
+            right=PADDING,
+            borderType=cv2.BORDER_CONSTANT,
+            value=[255, 255, 255],
+        )
+
         # annotated_frame = BOX_ANNOTATOR.annotate(annotated_frame, detections)
         # annotated_frame = BOX_LABEL_ANNOTATOR.annotate(annotated_frame, detections)
         # only annotate players
